@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DF ingest listener</title>
+<style>
+  body { background:#07070b; color:#ededf2; font:14px/1.5 Consolas,monospace; padding:2rem; }
+  .ok { color:#7cff4f } .err { color:#ff7a9e }
+</style>
+</head>
+<body>
+<h1>DEAD FUTURES · design ingest</h1>
+<p>Waiting for image data via postMessage…</p>
+<pre id="log"></pre>
+<script>
+// Local dev tool. The ChatGPT tab window.open()s this page (same Chrome,
+// authed session there) and postMessages {b64,timeline,slug}; we forward to
+// our same-origin API which writes public/designs/<timeline>/<slug>.png.
+const log = (m, cls) => {
+  const el = document.getElementById('log')
+  el.innerHTML += '<div class="' + (cls||'') + '">' + m + '</div>'
+}
+window.addEventListener('message', async (ev) => {
+  const d = ev.data
+  if (!d || d.type !== 'df-ingest' || !d.b64 || !d.slug || !d.timeline) return
+  log('received ' + d.slug + ' (' + Math.round(d.b64.length/1024) + ' KB b64)')
+  try {
+    const r = await fetch('/api/ingest', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ b64: d.b64, timeline: d.timeline, slug: d.slug }),
+    })
+    const j = await r.json()
+    if (j.ok) log('saved ' + j.file + ' ' + j.width + 'x' + j.height, 'ok')
+    else log('API error: ' + JSON.stringify(j), 'err')
+    if (ev.source) ev.source.postMessage({ type: 'df-ingest-ack', slug: d.slug, ok: !!j.ok }, '*')
+  } catch (e) {
+    log('failed: ' + e, 'err')
+    if (ev.source) ev.source.postMessage({ type: 'df-ingest-ack', slug: d.slug, ok: false }, '*')
+  }
+})
+// tell openers we are ready (they may retry until this arrives)
+if (window.opener) {
+  setInterval(() => window.opener.postMessage({ type: 'df-listener-ready' }, '*'), 400)
+}
+</script>
+</body>
+</html>
